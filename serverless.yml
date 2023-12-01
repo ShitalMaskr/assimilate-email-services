@@ -1,0 +1,303 @@
+service: assimilate-email-service
+frameworkVersion: '3'
+useDotenv: true
+
+custom:
+  serverless-offline:
+    httpPort: 6000
+    lambdaPort: 6001
+  region: ${env:region}
+  stage: ${env:stage}
+  accountId: ${env:accountId}
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: ${self:custom.region}
+  stage: '${sls:stage}'
+  httpApi:
+    cors: true
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "dynamodb:PutItem"
+        - "dynamodb:GetItem"
+        - "dynamodb:Get"
+        - "dynamodb:Scan"
+        - "dynamodb:UpdateItem"
+        - "dynamodb:DeleteItem"
+        - "dynamodb:Query"
+      Resource:
+        - "arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/${env:USER_TABLE_NAME}"
+        - "arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/${env:USER_TABLE_NAME}/index/EmailIndex"
+        - "arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/${env:EMAIL_TABLE_NAME}"
+        - "arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/${env:ORGANIZATION_TABLE_NAME}"
+        - "arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/${env:ORGANIZATION_TABLE_NAME}/index/DomainIndex"
+        - "arn:aws:s3:::assimilateemailservice"
+    - Effect: Allow
+      Action:
+        - s3:*
+      Resource: "*"
+  layers:
+    - arn:aws:lambda:${self:custom.region}:${self:custom.accountId}:layer:LmsBaselayer:1
+  environment:
+    NODE_PATH: './:/opt/node_modules'
+    DYNAMODB_USER_TABLE: ${env:USER_TABLE_NAME}
+    DYNAMODB_EMAIL_TABLE: ${env:EMAIL_TABLE_NAME}
+    DYNAMODB_ORGANIZATION_TABLE: ${env:ORGANIZATION_TABLE_NAME}
+    BUCKET_NAME: assimilateemailservice
+
+apiGateway:
+  binaryMediaTypes:
+    - 'multipart/form-data'
+
+package:
+  individually: true
+
+plugins:
+  - serverless-offline
+  - serverless-webpack
+  - serverless-dotenv-plugin
+
+functions:
+  createUser:
+    handler: src/controller/usersController.createUser
+    events:
+      - httpApi:
+          path: /createUser
+          method: post
+
+  getUser:
+    handler: src/controller/usersController.getUsers
+    events:
+      - httpApi:
+          path: /users
+          method: get
+
+  updateUser:
+    handler: src/controller/usersController.updateUser
+    events:
+      - httpApi:
+          path: /users
+          method: put
+
+  deleteUser:
+    handler: src/controller/usersController.deleteUser
+    events:
+      - httpApi:
+          path: /users/{id}
+          method: delete
+
+  loginUser:
+    handler: src/controller/authController.login
+    events:
+      - httpApi:
+          path: /login
+          method: POST
+    environment:
+      BUCKET: assimilateemailservice
+
+  createOrganization:
+    handler: src/controller/organizationController.createOrganization
+    events:
+      - httpApi:
+          path: /createOrganization
+          method: post
+
+  getOrganization:
+    handler: src/controller/organizationController.getOrganizations
+    events:
+      - httpApi:
+          path: /getOrganizations
+          method: get
+
+  getOrganizationById:
+    handler: src/controller/organizationController.getOrganizationById
+    events:
+      - httpApi:
+          path: /getOrganizationById
+          method: post
+
+  updateOrganization:
+    handler: src/controller/organizationController.updateOrganization
+    events:
+      - httpApi:
+          path: /updateOrganization
+          method: put
+
+  deleteOrganization:
+    handler: src/controller/organizationController.deleteOrganization
+    events:
+      - httpApi:
+          path: /Organization/{id}
+          method: delete
+
+  sendMail:
+    handler: src/controller/emailController.sendMail
+    events:
+      - httpApi:
+          path: /sendEmail
+          method: post
+
+resources:
+  Resources:
+    UserTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: email
+            AttributeType: S
+          - AttributeName: phoneNumber
+            AttributeType: S
+        BillingMode: PAY_PER_REQUEST
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        TableName: ${env:USER_TABLE_NAME}
+        GlobalSecondaryIndexes:
+          - IndexName: EmailIndex
+            KeySchema:
+              - AttributeName: email
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: PhoneNumberIndex
+            KeySchema:
+              - AttributeName: phoneNumber
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+
+    EmailTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: from
+            AttributeType: S
+          - AttributeName: to
+            AttributeType: S
+          - AttributeName: subject
+            AttributeType: S
+          - AttributeName: message
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+        TableName: ${env:EMAIL_TABLE_NAME}
+        GlobalSecondaryIndexes:
+          - IndexName: FromIndex
+            KeySchema:
+              - AttributeName: from
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: ToIndex
+            KeySchema:
+              - AttributeName: to
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: SubjectIndex
+            KeySchema:
+              - AttributeName: subject
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: MessageIndex
+            KeySchema:
+              - AttributeName: message
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+
+    OrganizationTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: organizationName
+            AttributeType: S
+          - AttributeName: address
+            AttributeType: S
+          - AttributeName: contactNo
+            AttributeType: S
+          - AttributeName: email
+            AttributeType: S
+          - AttributeName: url
+            AttributeType: S
+          - AttributeName: domain
+            AttributeType: S
+          - AttributeName: host
+            AttributeType: S
+          - AttributeName: port
+            AttributeType: S
+          - AttributeName: password
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+        TableName: ${env:ORGANIZATION_TABLE_NAME}
+        GlobalSecondaryIndexes:
+          - IndexName: organizationNameIndex
+            KeySchema:
+              - AttributeName: organizationName
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: AddressIndex
+            KeySchema:
+              - AttributeName: address
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: ContactNoIndex
+            KeySchema:
+              - AttributeName: contactNo
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: EmailIndex
+            KeySchema:
+              - AttributeName: email
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: UrlIndex
+            KeySchema:
+              - AttributeName: url
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: DomainIndex
+            KeySchema:
+              - AttributeName: domain
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: HostIndex
+            KeySchema:
+              - AttributeName: host
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: PortIndex
+            KeySchema:
+              - AttributeName: port
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: PasswordIndex
+            KeySchema:
+              - AttributeName: password
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+
+               
